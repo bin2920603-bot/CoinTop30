@@ -6,8 +6,22 @@ import matplotlib.pyplot as plt
 BARS = ["15m"]  # "1m" "5m" "15m" 중 바꿔 쓰기
 COUNT = 30
 TOKEN = os.environ["TG_TOKEN"]
-CHAT = os.environ["TG_CHAT"]
 OKX = "https://www.okx.com"
+
+
+def find_chat():
+    r = requests.get(
+        f"https://api.telegram.org/bot{TOKEN}/getUpdates", timeout=20
+    ).json()
+    for u in reversed(r.get("result", [])):
+        for k in ("message", "my_chat_member", "channel_post"):
+            c = u.get(k, {}).get("chat")
+            if c and c.get("type") in ("group", "supergroup"):
+                return str(c["id"])
+    raise SystemExit("방을 못 찾았어요. 방에 /start@tajeom_top30_bot 을 다시 보내주세요")
+
+
+CHAT = os.environ.get("TG_CHAT") or find_chat()
 
 
 def top_coins():
