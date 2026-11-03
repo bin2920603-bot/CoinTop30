@@ -1,18 +1,31 @@
 name: run
+
 on:
   workflow_dispatch:
   schedule:
     - cron: "17 * * * *"
+
+concurrency:
+  group: top30
+  cancel-in-progress: false
+
 jobs:
   go:
     runs-on: ubuntu-latest
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: python main.py
+      - name: 1시간마다 반복 (약 5시간 40분)
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT: ${{ secrets.TG_CHAT }}
+        run: |
+          START=$SECONDS
+          while [ $((SECONDS - START)) -lt 20000 ]; do
+            python main.py || echo "실행 실패"
+            sleep 3300
+          done
