@@ -9,6 +9,13 @@ TOKEN = os.environ["TG_TOKEN"]
 OKX = "https://www.okx.com"
 
 
+def num(v):
+    try:
+        return float(v)
+    except Exception:
+        return 0.0
+
+
 def find_chat():
     r = requests.get(
         f"https://api.telegram.org/bot{TOKEN}/getUpdates", timeout=20
@@ -30,7 +37,9 @@ def top_coins():
     rows = []
     for t in data:
         if t["instId"].endswith("-USDT-SWAP"):
-            rows.append((float(t["volCcy24h"]) * float(t["last"]), t["instId"]))
+            v = num(t.get("volCcy24h")) * num(t.get("last"))
+            if v > 0:
+                rows.append((v, t["instId"]))
     rows.sort(reverse=True)
     return rows[:COUNT]
 
@@ -48,11 +57,11 @@ def make_chart(rank, inst, vol24, bar):
         2, 1, figsize=(8, 6), sharex=True,
         gridspec_kw={"height_ratios": [3, 1]})
     for i, x in enumerate(d):
-        o, h, l, c = map(float, x[1:5])
+        o, h, l, c = (num(v) for v in x[1:5])
         col = "#d62728" if c >= o else "#1f77b4"
         a1.plot([i, i], [l, h], color=col, lw=1)
         a1.bar(i, abs(c - o), bottom=min(o, c), color=col, width=0.7)
-        a2.bar(i, float(x[7]), color=col, width=0.7)
+        a2.bar(i, num(x[7]), color=col, width=0.7)
     name = inst.replace("-USDT-SWAP", "")
     a1.set_title(f"#{rank} {name}  {bar}  24h ${vol24/1e6:,.0f}M")
     a1.grid(alpha=0.2)
