@@ -28,6 +28,8 @@ def find_chat():
 
 CHAT = os.environ.get("TG_CHAT") or find_chat()
 
+POOL = 100  # 24h 거래대금 상위 100개 중에서 급증 코인을 고름
+
 def top_coins():
     data = requests.get(OKX + "/api/v5/market/tickers", params={"instType": "SWAP"}, timeout=20).json()["data"]
     rows = []
@@ -37,7 +39,21 @@ def top_coins():
             if v > 0:
                 rows.append((v, t["instId"]))
     rows.sort(reverse=True)
-    return rows[:COUNT]
+    out = []
+    for v, inst in rows[:POOL]:
+        try:
+            d = requests.get(OKX + "/api/v5/market/candles",
+                             params={"instId": inst, "bar": "1H", "limit": 26}, timeout=20).json()["data"]
+            vols = [num(x[5]) for x in d]  # 최신이 앞
+            last, prev = vols[1], vols[2:26]  # 방금 끝난 1시간봉 vs 그 전 24시간 평균
+            avg = sum(prev) / len(prev) if prev else 0
+            if avg > 0:
+                out.append((last / avg, inst, v))
+        except Exception:
+            pass
+        time.sleep(0.12)
+    out.sort(reverse=True)
+    return out[:COUNT]
 
 def candles(inst, bar):
     for _ in range(3):
@@ -102,11 +118,11 @@ def panel(fig, spec, a, title):
     for ax in (axp, axv, axr, axm):
         ax.grid(alpha=0.25)
 
-def make_chart(inst, rank, vol, data=None):
+def make_chart(inst, rank, vol, ratio, data=None):
     fig = plt.figure(figsize=(14, 15), dpi=75)
     outer = GridSpec(2, 2, figure=fig, wspace=0.12, hspace=0.12, top=0.94, bottom=0.03, left=0.05, right=0.99)
     name = inst.replace("-USDT-SWAP", "")
-    fig.suptitle(f"#{rank} {name}   24h ${vol/1e6:.0f}M", fontsize=16, x=0.05, ha="left")
+    fig.suptitle(f"#{rank} {name}   1h volume x{ratio:.1f}   24h ${vol/1e6:.0f}M", fontsize=16, x=0.05, ha="left")
     for i, (bar, label) in enumerate(BARS):
         a = data[bar] if data else candles(inst, bar)
         panel(fig, outer[i // 2, i % 2], a, label)
@@ -124,10 +140,10 @@ def send(buf, caption):
         print("전송 실패", r.text)
 
 def main():
-    for rank, (v, inst) in enumerate(top_coins(), 1):
+    for rank, (ratio, inst, v) in enumerate(top_coins(), 1):
         try:
-            buf = make_chart(inst, rank, v)
-            send(buf, f"#{rank} {inst.replace('-USDT-SWAP','')}")
+            buf = make_chart(inst, rank, v, ratio)
+            send(buf, f"#{rank} {inst.replace('-USDT-SWAP','')}  거래대금 x{ratio:.1f}")
         except Exception as e:
             print(inst, "실패", e)
         time.sleep(1.2)
