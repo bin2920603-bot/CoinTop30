@@ -59,10 +59,10 @@ def candles(inst, bar):
     for _ in range(3):
         try:
             d = requests.get(OKX + "/api/v5/market/candles",
-                             params={"instId": inst, "bar": bar, "limit": 200}, timeout=20).json()["data"]
+                             params={"instId": inst, "bar": bar, "limit": 300}, timeout=20).json()["data"]
             d = d[::-1]
-            a = np.array([[num(x[1]), num(x[2]), num(x[3]), num(x[4]), num(x[5])] for x in d])
-            return a  # o h l c vol
+            a = np.array([[num(x[1]), num(x[2]), num(x[3]), num(x[4]), num(x[5]), num(x[6])] for x in d])
+            return a  # o h l c vol volCcy
         except Exception:
             time.sleep(1)
     return None
@@ -87,20 +87,43 @@ def rsi(c, n=14):
         out[i] = 100 if al == 0 else 100 - 100 / (1 + ag / al)
     return out
 
+LINES = [("EMA7", 7, "#e91e8c"), ("EMA10", 10, "#29b6f6"), ("EMA20", 20, "#e0a800"),
+         ("EMA50", 50, "#2e9e44"), ("EMA120", 120, "#8a8a8a"), ("EMA200", 200, "#e53935")]
+VW_COLOR = "#000000"
+
+def vwap100(a):
+    tp = (a[:, 1] + a[:, 2] + a[:, 3]) / 3
+    w = a[:, 5]
+    out = np.full(len(a), np.nan)
+    for i in range(99, len(a)):
+        sw = w[i - 99:i + 1].sum()
+        if sw > 0:
+            out[i] = (tp[i - 99:i + 1] * w[i - 99:i + 1]).sum() / sw
+    return out
+
 def panel(fig, spec, a, title):
     gs = GridSpecFromSubplotSpec(4, 1, subplot_spec=spec, height_ratios=[4, 1, 1.3, 1.3], hspace=0.08)
     axp = fig.add_subplot(gs[0]); axv = fig.add_subplot(gs[1], sharex=axp)
     axr = fig.add_subplot(gs[2], sharex=axp); axm = fig.add_subplot(gs[3], sharex=axp)
     if a is None or len(a) < 30:
-        axp.set_title(title + " (no data)", fontsize=11); return
+        axp.set_title(title + " (데이터 없음)", fontsize=11); return
     c = a[:, 3]
     r = rsi(c)
+    ma = {nm: ema(c, n) for nm, n, _ in LINES}
+    vw = vwap100(a)
     m = ema(c, 12) - ema(c, 26); sg = ema(m, 9); hist = m - sg
+    ma = {k: v[-SHOW:] for k, v in ma.items()}; vw = vw[-SHOW:]
     a = a[-SHOW:]; r = r[-SHOW:]; m = m[-SHOW:]; sg = sg[-SHOW:]; hist = hist[-SHOW:]
     x = np.arange(len(a))
     col = ["#d32f2f" if a[i, 3] >= a[i, 0] else "#1565c0" for i in x]
     axp.vlines(x, a[:, 2], a[:, 1], colors=col, linewidth=0.8)
     axp.bar(x, a[:, 3] - a[:, 0], bottom=a[:, 0], color=col, width=0.7)
+    for nm, n, color in LINES:
+        axp.plot(x, ma[nm], color=color, lw=1.1)
+    axp.plot(x, vw, color=VW_COLOR, lw=1.4)
+    lo, hi = a[:, 2].min(), a[:, 1].max()
+    pad = (hi - lo) * 0.05
+    axp.set_ylim(lo - pad, hi + pad)   # 가격 범위만 보여줌(너무 먼 선은 화면 밖)
     axp.set_title(title, fontsize=11, loc="left")
     axv.bar(x, a[:, 4], color=col, width=0.7)
     axr.plot(x, r, color="#6a1b9a", linewidth=1)
@@ -123,6 +146,10 @@ def make_chart(inst, rank, vol, ratio, data=None):
     outer = GridSpec(2, 2, figure=fig, wspace=0.12, hspace=0.12, top=0.94, bottom=0.03, left=0.05, right=0.99)
     name = inst.replace("-USDT-SWAP", "")
     fig.suptitle(f"#{rank} {name}   1h volume x{ratio:.1f}   24h ${vol/1e6:.0f}M", fontsize=16, x=0.05, ha="left")
+    from matplotlib.lines import Line2D
+    handles = [Line2D([0], [0], color=c, lw=2) for _, _, c in LINES] + [Line2D([0], [0], color=VW_COLOR, lw=2)]
+    fig.legend(handles, [nm for nm, _, _ in LINES] + ["VWAP100"], loc="upper right",
+               ncol=7, fontsize=9, frameon=False, bbox_to_anchor=(0.99, 0.985))
     for i, (bar, label) in enumerate(BARS):
         a = data[bar] if data else candles(inst, bar)
         panel(fig, outer[i // 2, i % 2], a, label)
