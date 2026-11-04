@@ -18,11 +18,22 @@ def num(v):
         return 0.0
 
 def find_chat():
-    r = requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates", timeout=20).json()
+    r = requests.get(f"https://api.telegram.org/bot{TOKEN}/getUpdates",
+                     params={"limit": 100}, timeout=20).json()
+    if not r.get("ok"):
+        print("[텔레그램 getUpdates 실패]", r.get("error_code"), r.get("description"))
+    seen = {}
+    for u in r.get("result", []):
+        for k in ("message", "my_chat_member", "channel_post", "edited_message"):
+            c = u.get(k, {}).get("chat")
+            if c:
+                seen[str(c["id"])] = (c.get("type"), c.get("title") or c.get("first_name"))
+    print("[봇이 아는 방]", seen)
     for u in reversed(r.get("result", [])):
         for k in ("message", "my_chat_member", "channel_post"):
             c = u.get(k, {}).get("chat")
             if c and c.get("type") in ("group", "supergroup"):
+                print("[찾은 방]", c["id"], c.get("title"))
                 return str(c["id"])
     raise SystemExit("방을 못 찾았어요. 방에 /start@tajeom_top30_bot 을 다시 보내주세요")
 
@@ -164,7 +175,7 @@ def send(buf, caption):
                       data={"chat_id": CHAT, "caption": caption},
                       files={"photo": ("c.png", buf)}, timeout=60)
     if not r.ok:
-        print("전송 실패", r.text)
+        print("전송 실패", r.status_code, r.text[:200])
 
 def main():
     for rank, (ratio, inst, v) in enumerate(top_coins(), 1):
