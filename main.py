@@ -51,7 +51,7 @@ def top_coins():
                 rows.append((v, t["instId"]))
     rows.sort(reverse=True)
     out = []
-    for v, inst in rows[:POOL]:
+    for v, inst in rows[:COUNT]:
         try:
             d = requests.get(OKX + "/api/v5/market/candles",
                              params={"instId": inst, "bar": "1H", "limit": 26}, timeout=20).json()["data"]
@@ -63,7 +63,7 @@ def top_coins():
         except Exception:
             pass
         time.sleep(0.12)
-    out.sort(reverse=True)
+    out.sort(key=lambda x: -x[2])
     return out[:COUNT]
 
 def candles(inst, bar):
