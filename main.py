@@ -7,7 +7,7 @@ from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 
 BARS = [("1D", "1D"), ("4H", "4H"), ("1H", "1H"), ("15m", "15m")]
 COUNT = 30
-SHOW = 80
+SHOW = 120
 TOKEN = os.environ["TG_TOKEN"]
 OKX = "https://www.okx.com"
 
@@ -112,6 +112,66 @@ def vwap100(a):
             out[i] = (tp[i - 99:i + 1] * w[i - 99:i + 1]).sum() / sw
     return out
 
+# ---------------- 추세선 (노란색) ----------------
+TREND_EXT = 20        # 추세선을 오른쪽으로 몇 봉 더 늘려 그릴지
+TREND_K = 2           # 좌우 몇 봉보다 높아야(낮아야) 고점(저점)으로 볼지
+TREND_TOL = 0.03      # 꼬리가 선을 넘어도 봐주는 여유 (차트 높이의 3%)
+TREND_BAD = 1         # 선을 넘은 봉이 이 개수 이하면 인정
+TREND_MIN_GAP = 8     # 선을 긋는 두 점 사이 최소 봉 수
+TREND_COLOR = "#FFC107"
+
+def find_swings(vals, k, high=True):
+    out = []
+    for i in range(k, len(vals) - k):
+        window = vals[i - k:i + k + 1]
+        if (high and vals[i] == max(window)) or ((not high) and vals[i] == min(window)):
+            out.append(i)
+    return out
+
+def find_trendline(a, kind):
+    n = len(a)
+    highs = list(a[:, 1]); lows = list(a[:, 2])
+    tol = TREND_TOL * (max(highs) - min(lows))
+    if kind == "down":
+        vals = highs
+        swings = find_swings(vals, TREND_K, True)
+    else:
+        vals = lows
+        swings = find_swings(vals, TREND_K, False)
+    best = None
+    for b in swings[-4:]:
+        for s0 in swings:
+            if b - s0 < TREND_MIN_GAP:
+                break
+            if kind == "down" and vals[s0] <= vals[b]:
+                continue
+            if kind == "up" and vals[s0] >= vals[b]:
+                continue
+            slope = (vals[b] - vals[s0]) / (b - s0)
+            bad = 0
+            for x in range(s0, n - 1):
+                line = vals[s0] + slope * (x - s0)
+                if kind == "down" and vals[x] > line + tol:
+                    bad += 1
+                if kind == "up" and vals[x] < line - tol:
+                    bad += 1
+            if bad > TREND_BAD:
+                continue
+            span = b - s0
+            if best is None or span > best[0]:
+                best = (span, s0, vals[s0], n - 1, vals[s0] + slope * (n - 1 - s0))
+    return best[1:] if best else None
+
+def draw_trendlines(ax, a):
+    n = len(a)
+    for kind in ("down", "up"):
+        t = find_trendline(a, kind)
+        if t:
+            x0, y0, x1, y1 = t
+            slope = (y1 - y0) / (x1 - x0) if x1 != x0 else 0
+            x_end = n - 1 + TREND_EXT
+            ax.plot([x0, x_end], [y0, y0 + slope * (x_end - x0)], color=TREND_COLOR, linewidth=3.0)
+
 def panel(fig, spec, a, title):
     gs = GridSpecFromSubplotSpec(4, 1, subplot_spec=spec, height_ratios=[4, 1, 1.3, 1.3], hspace=0.08)
     axp = fig.add_subplot(gs[0]); axv = fig.add_subplot(gs[1], sharex=axp)
@@ -134,7 +194,9 @@ def panel(fig, spec, a, title):
     axp.plot(x, vw, color=VW_COLOR, lw=1.4)
     lo, hi = a[:, 2].min(), a[:, 1].max()
     pad = (hi - lo) * 0.05
+    draw_trendlines(axp, a)
     axp.set_ylim(lo - pad, hi + pad)   # 가격 범위만 보여줌(너무 먼 선은 화면 밖)
+    axp.set_xlim(-1, len(a) + TREND_EXT)
     axp.set_title(title, fontsize=11, loc="left")
     axv.bar(x, a[:, 4], color=col, width=0.7)
     axr.plot(x, r, color="#6a1b9a", linewidth=1)
