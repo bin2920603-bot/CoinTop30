@@ -72,8 +72,8 @@ def candles(inst, bar):
             d = requests.get(OKX + "/api/v5/market/candles",
                              params={"instId": inst, "bar": bar, "limit": 300}, timeout=20).json()["data"]
             d = d[::-1]
-            a = np.array([[num(x[1]), num(x[2]), num(x[3]), num(x[4]), num(x[5]), num(x[6])] for x in d])
-            return a  # o h l c vol volCcy
+            a = np.array([[num(x[1]), num(x[2]), num(x[3]), num(x[4]), num(x[5]), num(x[6]), num(x[0])] for x in d])
+            return a  # o h l c vol volCcy ts(밀리초)
         except Exception:
             time.sleep(1)
     return None
@@ -172,6 +172,49 @@ def draw_trendlines(ax, a):
             x_end = n - 1 + TREND_EXT
             ax.plot([x0, x_end], [y0, y0 + slope * (x_end - x0)], color=TREND_COLOR, linewidth=3.0)
 
+def fmtp(v):
+    if v >= 100:
+        return f"{v:,.2f}"
+    if v >= 1:
+        return f"{v:.4f}"
+    return f"{v:.7f}"
+
+def draw_day_marks(axp, others, a, title):
+    """오늘 시가·고가·저가·현재가(연한 회색 점선+작은 글자) + 1시간봉·15분봉에는 매일 01시(한국시간) 일봉 마감 세로선.
+    글자는 영어로 (이 알림은 한글 글꼴이 없어서)"""
+    grey, txt = "#90a4ae", "#607d8b"
+    H = 3600000
+    ts = a[:, 6]
+    last = int(ts[-1])
+    start = (last + 8 * H) // (24 * H) * (24 * H) - 8 * H
+    idx = np.where(ts >= start)[0]
+    if len(idx):
+        t = a[idx[0]:]
+        vals = {"Open": float(t[0, 0]), "High": float(t[:, 1].max()),
+                "Low": float(t[:, 2].min()), "Last": float(a[-1, 3])}
+        items = sorted(vals.items(), key=lambda kv: -kv[1])
+        y0, y1 = axp.get_ylim()
+        gap = (y1 - y0) * 0.07
+        pos = []
+        for _, v in items:
+            axp.axhline(v, color=grey, lw=0.9, ls="--", alpha=0.8)
+            pos.append(v if not pos else min(v, pos[-1] - gap))
+        n = len(a)
+        for (name, v), y in zip(items, pos):
+            axp.annotate(f"{name} {fmtp(v)}", xy=(n + 1, v), xytext=(n + 2, y), xycoords="data", textcoords="data",
+                         fontsize=6.5, color=txt, va="center", ha="left", fontweight="bold", annotation_clip=False,
+                         arrowprops=dict(arrowstyle="-", color=grey, lw=0.6, shrinkA=0, shrinkB=0))
+    if title in ("1H", "15m"):
+        for i in range(1, len(a)):
+            hour = int(ts[i] // H + 9) % 24
+            minute = int(ts[i] // 60000) % 60
+            if hour == 1 and minute == 0:
+                for ax in [axp] + others:
+                    ax.axvline(i - 0.5, color=grey, lw=1.0, ls=(0, (2, 2)), alpha=0.9)
+                if i >= 14:
+                    axp.text(i - 0.5, 1.0, "01:00 close", transform=axp.get_xaxis_transform(), fontsize=7,
+                             color=txt, ha="center", va="bottom", fontweight="bold")
+
 def panel(fig, spec, a, title):
     gs = GridSpecFromSubplotSpec(4, 1, subplot_spec=spec, height_ratios=[4, 1, 1.3, 1.3], hspace=0.08)
     axp = fig.add_subplot(gs[0]); axv = fig.add_subplot(gs[1], sharex=axp)
@@ -197,6 +240,7 @@ def panel(fig, spec, a, title):
     draw_trendlines(axp, a)
     axp.set_ylim(lo - pad, hi + pad)   # 가격 범위만 보여줌(너무 먼 선은 화면 밖)
     axp.set_xlim(-1, len(a) + TREND_EXT)
+    draw_day_marks(axp, [axv, axr, axm], a, title)
     axp.set_title(title, fontsize=11, loc="left")
     axv.bar(x, a[:, 4], color=col, width=0.7)
     axr.plot(x, r, color="#6a1b9a", linewidth=1)
