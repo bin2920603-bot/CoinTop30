@@ -277,12 +277,66 @@ def draw_day_marks(axp, others, a, title):
                     axp.text(i - 0.5, 1.0, "01:00 close", transform=axp.get_xaxis_transform(), fontsize=7,
                              color=txt, ha="center", va="bottom", fontweight="bold")
 
+
+# ---------------- 일목 구름 + 하이킨아시 + 배열 글자 (다른 일봉 알림과 같은 새 모양) ----------------
+SHIFT = 26             # 일목 구름이 앞으로 나가는 봉 수
+
+def _mid(H, L, i, n):
+    s = max(0, i - n + 1)
+    return (H[s:i + 1].max() + L[s:i + 1].min()) / 2
+
+def draw_cloud(ax, H, L, n):
+    """일목 구름: 선행스팬A=(전환선9+기준선26)/2, 선행스팬B=52봉 중간값, 26봉 앞으로 밀어서 그림
+    파랑 구름 = A가 위(상승) / 주황 구름 = B가 위(하락)"""
+    total = len(H)
+    first = total - n
+    xs, av, bv = [], [], []
+    for j in range(n + SHIFT):
+        s = first + j - SHIFT
+        if s < 51 or s > total - 1:
+            continue
+        av.append((_mid(H, L, s, 9) + _mid(H, L, s, 26)) / 2)
+        bv.append(_mid(H, L, s, 52))
+        xs.append(j)
+    if len(xs) < 2:
+        return
+    ax.fill_between(xs, av, bv, where=[p >= q for p, q in zip(av, bv)],
+                    color="#42a5f5", alpha=0.16, linewidth=0, interpolate=True, zorder=0)
+    ax.fill_between(xs, av, bv, where=[p < q for p, q in zip(av, bv)],
+                    color="#ffa726", alpha=0.18, linewidth=0, interpolate=True, zorder=0)
+
+def draw_ha(axh, a, n):
+    """가격 차트 아래 작은 칸에 하이킨아시 캔들 (색은 위 캔들과 같게: 상승 빨강 / 하락 파랑)"""
+    o, h, l, c = a[:, 0], a[:, 1], a[:, 2], a[:, 3]
+    out = []
+    for i in range(len(a)):
+        hc = (o[i] + h[i] + l[i] + c[i]) / 4
+        ho = (o[i] + c[i]) / 2 if i == 0 else (out[-1][0] + out[-1][3]) / 2
+        out.append((ho, max(h[i], ho, hc), min(l[i], ho, hc), hc))
+    for i, (ho, hh, hl, hc) in enumerate(out[-n:]):
+        col = "#d32f2f" if hc >= ho else "#1565c0"
+        axh.vlines(i, hl, hh, color=col, linewidth=0.8)
+        axh.bar(i, abs(hc - ho) or (hh - hl) * 0.01, bottom=min(ho, hc), color=col, width=0.7)
+
+def draw_align(axp, ma):
+    e20, e50, e120 = ma["EMA20"][-1], ma["EMA50"][-1], ma["EMA120"][-1]
+    if e20 > e50 > e120:
+        txt, col = "Bull align ▲", "#2e7d32"
+    elif e20 < e50 < e120:
+        txt, col = "Bear align ▼", "#c62828"
+    else:
+        txt, col = "Mixed ─", "#555555"
+    axp.text(0.99, 0.97, txt, transform=axp.transAxes, ha="right", va="top", fontsize=11,
+             fontweight="bold", color=col)
+
 def panel(fig, spec, a, title):
-    gs = GridSpecFromSubplotSpec(4, 1, subplot_spec=spec, height_ratios=[4, 1, 1.3, 1.3], hspace=0.08)
-    axp = fig.add_subplot(gs[0]); axv = fig.add_subplot(gs[1], sharex=axp)
-    axr = fig.add_subplot(gs[2], sharex=axp); axm = fig.add_subplot(gs[3], sharex=axp)
+    gs = GridSpecFromSubplotSpec(5, 1, subplot_spec=spec, height_ratios=[5.2, 1.0, 0.9, 0.9, 0.9], hspace=0.08)
+    axp = fig.add_subplot(gs[0]); axh = fig.add_subplot(gs[1], sharex=axp)
+    axv = fig.add_subplot(gs[2], sharex=axp)
+    axr = fig.add_subplot(gs[3], sharex=axp); axm = fig.add_subplot(gs[4], sharex=axp)
     if a is None or len(a) < 30:
         axp.set_title(title + " (데이터 없음)", fontsize=11); return
+    afull = a
     c = a[:, 3]
     r = rsi(c)
     ma = {nm: ema(c, n) for nm, n, _ in LINES}
@@ -300,9 +354,12 @@ def panel(fig, spec, a, title):
     lo, hi = a[:, 2].min(), a[:, 1].max()
     pad = (hi - lo) * 0.05
     draw_trendlines(axp, a)
+    draw_cloud(axp, afull[:, 1], afull[:, 2], len(a))
+    draw_align(axp, ma)
+    draw_ha(axh, afull, len(a))
     axp.set_ylim(lo - pad, hi + pad)   # 가격 범위만 보여줌(너무 먼 선은 화면 밖)
-    axp.set_xlim(-1, len(a) + TREND_EXT)
-    draw_day_marks(axp, [axv, axr, axm], a, title)
+    axp.set_xlim(-1, len(a) + max(TREND_EXT, SHIFT + 2))
+    draw_day_marks(axp, [axh, axv, axr, axm], a, title)
     axp.set_title(title, fontsize=11, loc="left")
     axv.bar(x, a[:, 4], color=col, width=0.7)
     axr.plot(x, r, color="#6a1b9a", linewidth=1)
@@ -310,14 +367,14 @@ def panel(fig, spec, a, title):
     axr.set_ylim(0, 100); axr.set_yticks([30, 70])
     axm.bar(x, hist, color=["#d32f2f" if h >= 0 else "#1565c0" for h in hist], width=0.7)
     axm.plot(x, m, color="black", linewidth=0.8); axm.plot(x, sg, color="orange", linewidth=0.8)
-    for ax in (axp, axv, axr):
+    for ax in (axp, axh, axv, axr):
         plt.setp(ax.get_xticklabels(), visible=False)
     axm.set_xticks([])
-    for ax, lab in ((axv, "VOL"), (axr, "RSI"), (axm, "MACD")):
+    for ax, lab in ((axh, "HA"), (axv, "VOL"), (axr, "RSI"), (axm, "MACD")):
         ax.set_ylabel(lab, fontsize=7)
         ax.tick_params(labelsize=7)
     axp.tick_params(labelsize=8); axv.set_yticks([])
-    for ax in (axp, axv, axr, axm):
+    for ax in (axp, axh, axv, axr, axm):
         ax.grid(alpha=0.25)
 
 def make_chart(inst, rank, vol, ratio, data=None):
