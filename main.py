@@ -172,6 +172,68 @@ def draw_trendlines(ax, a):
             x_end = n - 1 + TREND_EXT
             ax.plot([x0, x_end], [y0, y0 + slope * (x_end - x0)], color=TREND_COLOR, linewidth=3.0)
 
+
+# ---------------- 지지·저항 박스 + 과매도/과매수 표시 (일봉 알림 차트와 같은 방식) ----------------
+Z_PIVOT = 5            # 앞뒤 5봉보다 높/낮으면 고점/저점
+Z_NEAR = 0.06          # 차트 가격 높이의 6% 안에 모이는 고/저점은 같은 박스
+Z_RSI_LOW, Z_RSI_HIGH = 30, 70   # 이 값 이하 파란 ▲(과매도) / 이상 빨간 ▼(과매수)
+
+def _pivots(a):
+    hi, lo = [], []
+    for i in range(Z_PIVOT, len(a) - Z_PIVOT):
+        if a[i, 1] >= a[i - Z_PIVOT:i + Z_PIVOT + 1, 1].max():
+            hi.append(a[i, 1])
+        if a[i, 2] <= a[i - Z_PIVOT:i + Z_PIVOT + 1, 2].min():
+            lo.append(a[i, 2])
+    return hi, lo
+
+def _zones(pts, price, above, tol):
+    """비슷한 가격의 고/저점을 묶어 박스로 만듦. 현재가 위(저항)/아래(지지) 가까운 2개만"""
+    groups = []
+    for p in sorted(pts):
+        if groups and p <= groups[-1][0] + tol:
+            groups[-1][1].append(p)
+            groups[-1][0] = p
+        else:
+            groups.append([p, [p]])
+    zs = [(min(g[1]), max(g[1])) for g in groups]
+    if above:
+        zs = sorted([z for z in zs if z[0] > price], key=lambda z: z[0])
+    else:
+        zs = sorted([z for z in zs if z[1] < price], key=lambda z: -z[1])
+    return zs[:2]
+
+def _extras(ax, a):
+    price = a[-1, 3]
+    top, bot = a[:, 1].max(), a[:, 2].min()
+    rng = top - bot
+    if rng <= 0:
+        return
+    hi, lo = _pivots(a)
+    pad = rng * 0.012
+    for zl, zh in _zones(lo, price, False, rng * Z_NEAR):    # 지지: 초록 박스
+        ax.axhspan(zl - pad, zh + pad, color="#2e7d32", alpha=0.18, zorder=0)
+    for zl, zh in _zones(hi, price, True, rng * Z_NEAR):     # 저항: 빨강 박스
+        ax.axhspan(zl - pad, zh + pad, color="#c62828", alpha=0.18, zorder=0)
+    y0, y1 = ax.get_ylim()
+    gap = (y1 - y0) * 0.025
+    rs = rsi(a[:, 3])
+    for i in range(len(a)):
+        if rs[i] <= Z_RSI_LOW:
+            ax.scatter(i, a[i, 2] - gap, marker="^", s=28, color="#0d47a1", zorder=5)
+        elif rs[i] >= Z_RSI_HIGH:
+            ax.scatter(i, a[i, 1] + gap, marker="v", s=28, color="#d50000", zorder=5)
+
+_orig_trend = draw_trendlines
+
+def draw_trendlines(ax, a):
+    """원래 노란 추세선을 그린 뒤, 지지·저항 박스와 ▲▼를 얹음 (실패해도 차트는 그대로)"""
+    _orig_trend(ax, a)
+    try:
+        _extras(ax, a)
+    except Exception as e:
+        print("[박스 오류]", e)
+
 def fmtp(v):
     if v >= 100:
         return f"{v:,.2f}"
